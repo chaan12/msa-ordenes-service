@@ -2,7 +2,7 @@
 
     <appender name="CLOUDWATCH" class="ca.pjer.logback.AwsLogsAppender">
         <logGroupName>ordenes-log-group</logGroupName>
-        <logStreamName>ordenes-service</logStreamName>
+        <logStreamName>microservicio-ordenes</logStreamName>
 
         <logRegion>us-east-1</logRegion>
         <cloudWatchEndpoint>http://localstack:4566</cloudWatchEndpoint>
