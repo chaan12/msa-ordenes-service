@@ -67,7 +67,11 @@ class OrdenControllerRetryPublishingTest {
         org.junit.jupiter.api.Assertions.assertEquals("usr-001", data.get("usuarioId").asText());
         org.junit.jupiter.api.Assertions.assertEquals("pendiente", data.get("status").asText());
         org.junit.jupiter.api.Assertions.assertEquals("PENDING", root.get("sendEmail").get("status").asText());
+        org.junit.jupiter.api.Assertions.assertEquals("Pendiente de ejecutar el paso de envio de correo",
+                root.get("sendEmail").get("message").asText());
         org.junit.jupiter.api.Assertions.assertEquals("PENDING", root.get("updateRetryJobs").get("status").asText());
+        org.junit.jupiter.api.Assertions.assertEquals("Pendiente de ejecutar el paso de actualizacion del retry job",
+                root.get("updateRetryJobs").get("message").asText());
     }
 
     @Test
