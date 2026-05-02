@@ -63,15 +63,12 @@ class OrdenControllerRetryPublishingTest {
         JsonNode root = objectMapper.readTree(payloadCaptor.getValue());
         JsonNode data = root.get("data");
 
+        org.junit.jupiter.api.Assertions.assertEquals(1, root.size());
         org.junit.jupiter.api.Assertions.assertEquals("prod-001", data.get("productoId").asText());
         org.junit.jupiter.api.Assertions.assertEquals("usr-001", data.get("usuarioId").asText());
         org.junit.jupiter.api.Assertions.assertEquals("pendiente", data.get("status").asText());
-        org.junit.jupiter.api.Assertions.assertEquals("PENDING", root.get("sendEmail").get("status").asText());
-        org.junit.jupiter.api.Assertions.assertEquals("Pendiente de ejecutar el paso de envio de correo",
-                root.get("sendEmail").get("message").asText());
-        org.junit.jupiter.api.Assertions.assertEquals("PENDING", root.get("updateRetryJobs").get("status").asText());
-        org.junit.jupiter.api.Assertions.assertEquals("Pendiente de ejecutar el paso de actualizacion del retry job",
-                root.get("updateRetryJobs").get("message").asText());
+        org.junit.jupiter.api.Assertions.assertFalse(root.has("sendEmail"));
+        org.junit.jupiter.api.Assertions.assertFalse(root.has("updateRetryJobs"));
     }
 
     @Test
@@ -88,6 +85,26 @@ class OrdenControllerRetryPublishingTest {
                                 }
                                 """))
                 .andExpect(status().isBadRequest());
+
+        verify(kafkaTemplate, never()).send(eq("order_retry_jobs"), org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void shouldNotRepublishRetryMessageWhenRequestComesFromBroker() throws Exception {
+        when(ordenService.crearOrden(org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new IllegalStateException("Mongo no disponible"));
+
+        mockMvc.perform(post("/ordenes")
+                        .header("X-Broker-Retry", "true")
+                        .contentType(APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "productoId": "prod-broker-001",
+                                  "usuarioId": "usr-broker-001",
+                                  "status": "pendiente"
+                                }
+                                """))
+                .andExpect(status().isInternalServerError());
 
         verify(kafkaTemplate, never()).send(eq("order_retry_jobs"), org.mockito.ArgumentMatchers.anyString());
     }
