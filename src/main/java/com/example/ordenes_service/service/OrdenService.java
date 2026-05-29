@@ -14,8 +14,10 @@ import org.springframework.web.server.ResponseStatusException;
 import com.example.ordenes_service.dto.InventoryUpdateEvent;
 import com.example.ordenes_service.dto.InventoryUpdateItem;
 import com.example.ordenes_service.dto.OrderStatusChangedEvent;
+import com.example.ordenes_service.dto.ProductResponse;
 import com.example.ordenes_service.dto.OrdenPaymentRequest;
 import com.example.ordenes_service.dto.OrdenStatusRequest;
+import com.example.ordenes_service.client.ProductClient;
 import com.example.ordenes_service.messaging.InventoryEventPublisher;
 import com.example.ordenes_service.messaging.OrderStatusEventPublisher;
 import com.example.ordenes_service.model.Orden;
@@ -30,12 +32,14 @@ public class OrdenService {
     private final OrdenRepository ordenRepository;
     private final InventoryEventPublisher inventoryEventPublisher;
     private final OrderStatusEventPublisher orderStatusEventPublisher;
+    private final ProductClient productClient;
 
     public OrdenService(OrdenRepository ordenRepository, InventoryEventPublisher inventoryEventPublisher,
-            OrderStatusEventPublisher orderStatusEventPublisher) {
+            OrderStatusEventPublisher orderStatusEventPublisher, ProductClient productClient) {
         this.ordenRepository = ordenRepository;
         this.inventoryEventPublisher = inventoryEventPublisher;
         this.orderStatusEventPublisher = orderStatusEventPublisher;
+        this.productClient = productClient;
     }
 
     public Orden crearOrden(Orden orden) {
@@ -44,7 +48,9 @@ public class OrdenService {
         orden.setProductoId(orden.getProductoId().trim());
         orden.setUsuarioId(orden.getUsuarioId().trim());
         orden.setCantidad(normalizeCantidad(orden.getCantidad()));
-        orden.setTotal(normalizePositiveAmount(orden.getTotal(), "El total de la orden debe ser mayor que cero"));
+        ProductResponse product = productClient.getProduct(orden.getProductoId());
+        validateStock(product, orden.getCantidad());
+        orden.setTotal(calculateTotal(product, orden.getCantidad()));
         orden.setSaldoRestante(orden.getTotal());
         orden.setStatus(normalizeStatus(orden.getStatus(), true));
         Orden savedOrden = ordenRepository.save(orden);
@@ -76,23 +82,27 @@ public class OrdenService {
         Orden orden = obtenerOrdenPorId(id);
         String oldProductoId = orden.getProductoId();
         int oldCantidad = normalizeCantidad(orden.getCantidad());
+        String newProductoId = oldProductoId;
+        int newCantidad = oldCantidad;
 
         if (request.getProductoId() != null && !request.getProductoId().trim().isEmpty()) {
-            orden.setProductoId(request.getProductoId().trim());
+            newProductoId = request.getProductoId().trim();
         }
         if (request.getUsuarioId() != null && !request.getUsuarioId().trim().isEmpty()) {
             orden.setUsuarioId(request.getUsuarioId().trim());
         }
         if (request.getCantidad() != null) {
-            orden.setCantidad(normalizeCantidad(request.getCantidad()));
+            newCantidad = normalizeCantidad(request.getCantidad());
         }
         if (request.getNotificationEmail() != null) {
             orden.setNotificationEmail(request.getNotificationEmail());
         }
-        if (request.getTotal() != null) {
-            actualizarTotalPreservandoPagos(orden,
-                    normalizePositiveAmount(request.getTotal(), "El total de la orden debe ser mayor que cero"));
-        }
+
+        ProductResponse product = productClient.getProduct(newProductoId);
+        validateStock(product, requiredStock(oldProductoId, oldCantidad, newProductoId, newCantidad));
+        orden.setProductoId(newProductoId);
+        orden.setCantidad(newCantidad);
+        actualizarTotalPreservandoPagos(orden, calculateTotal(product, newCantidad));
 
         Orden savedOrden = ordenRepository.save(orden);
         List<InventoryUpdateItem> inventoryItems = buildInventoryDelta(oldProductoId, oldCantidad,
@@ -160,6 +170,33 @@ public class OrdenService {
         if (orden.getTotal() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "El total de la orden es obligatorio");
         }
+    }
+
+    private void validateStock(ProductResponse product, int requestedQuantity) {
+        if (requestedQuantity <= 0) {
+            return;
+        }
+        int stock = product.getQuantity() == null ? 0 : product.getQuantity();
+        if (stock <= 0) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "El producto no tiene stock disponible");
+        }
+        if (requestedQuantity > stock) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Stock insuficiente para el producto " + product.getId());
+        }
+    }
+
+    private int requiredStock(String oldProductoId, int oldCantidad, String newProductoId, int newCantidad) {
+        if (oldProductoId.equals(newProductoId)) {
+            return Math.max(0, newCantidad - oldCantidad);
+        }
+        return newCantidad;
+    }
+
+    private BigDecimal calculateTotal(ProductResponse product, int cantidad) {
+        BigDecimal price = normalizePositiveAmount(product.getPrice(), "El precio del producto debe ser mayor que cero");
+        return price.multiply(BigDecimal.valueOf(cantidad));
     }
 
     private void validateId(String id, String message) {
